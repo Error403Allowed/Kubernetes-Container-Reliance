@@ -1,7 +1,14 @@
 import { useState, useEffect } from 'react'
 
+interface HealthData {
+  status: string
+  hostname: string
+  started: string
+  uptime: string
+}
+
 function App() {
-  const [data, setData] = useState(null)
+  const [data, setData] = useState<HealthData | null>(null)
 
   useEffect(() => {
     fetch('/health')
