@@ -1,6 +1,6 @@
 # Kubernetes Container App
 
-A containerized Python web application demonstrating **horizontal scaling**, **self-healing**, and **load balancing** on a local [kind](https://kind.sigs.k8s.io/) Kubernetes cluster.
+A containerized Python web application demonstrating **horizontal scaling**, **self-healing**, and **load balancing** on a local Kubernetes cluster (kind or Docker Desktop).
 
 Three replica pods run behind a Kubernetes Service. Chaos monkey randomly deletes a pod every 5–10 seconds — the ReplicaSet auto-heals and the Service keeps routing traffic to healthy pods. The app is accessible at `localhost:8081` without port-forwarding.
 
@@ -9,7 +9,7 @@ Three replica pods run behind a Kubernetes Service. Chaos monkey randomly delete
 ```
                     http://localhost:8081
                          |
-               [Service: NodePort :30081]
+             [Service: LoadBalancer]
                    /        |        \
                   v         v         v
               [pod]      [pod]      [pod]    Python HTTP servers (3 replicas)
@@ -17,63 +17,52 @@ Three replica pods run behind a Kubernetes Service. Chaos monkey randomly delete
                                             ReplicaSet replaces it immediately
 ```
 
-- **kind** — local Kubernetes cluster with port mapping `30081 → 8081`.
-- **Service** — NodePort on port `30081` distributes traffic across all ready pods.
+- **Service** — LoadBalancer on port `8081` distributes traffic across all ready pods.
 - **Deployment** — 3 replica pods, each running a Python 3.11 HTTP server.
 - **Health checks** — each pod serves `/health` (JSON).
 - **Chaos monkey** — a separate pod that deletes a random web pod every 5–10 seconds, forcing the system to self-heal.
 
 ## Prerequisites
 
-- [Homebrew](https://brew.sh/)
-- [Docker Desktop](https://docs.docker.com/get-docker/)
-- [kind](https://kind.sigs.k8s.io/) — installed via `brew install kind`
+- [Docker Desktop](https://docs.docker.com/get-docker/) with Kubernetes enabled
 - [kubectl](https://kubernetes.io/docs/tasks/tools/)
 
 ## Getting Started
 
 ```bash
-# 1. Install kind
-brew install kind
-
-# 2. Create the cluster
-kind create cluster --config k8s/kind-config.yaml
-
-# 3. Build the web container image
+# 1. Build the web container image
 docker compose build
 
-# 4. Load the image into kind
-kind load docker-image k8s-container-app
-
-# 5. Deploy everything to Kubernetes
+# 2. Deploy everything to Kubernetes
 kubectl apply -f k8s/
 
-# 6. Open the app
+# 3. Open the app
 open http://localhost:8081
 ```
 
-Refresh to see the hostname change as the Service load-balances across pods.
+## What to Expect
 
-## Chaos Monkey
+Two things happen at once:
 
-The chaos monkey pod runs automatically. It:
-
-1. Picks a random running web pod
-2. Deletes it with `kubectl delete pod`
-3. Sleeps 5–10 seconds
-4. Repeats forever
-
-The Kubernetes ReplicaSet controller detects the deleted pod and immediately creates a replacement. The Service seamlessly routes traffic to the remaining pods during the transition.
-
-To watch chaos in action:
+### Load Balancing (every request)
+The Service round-robins across all 3 pods. Every time you refresh or curl, a **different pod** may respond — so the hostname, start time, and uptime change on every request even without chaos.
 
 ```bash
-# Terminal 1 — watch pods get killed and recreated
-kubectl get pods -l app=web-app -w
-
-# Terminal 2 — watch the hostname change as traffic shifts
+# Watch the hostname change on every request
 while true; do curl -s http://localhost:8081/health | python3 -m json.tool; sleep 1; done
 ```
+
+### Chaos Monkey (every 5–10 seconds)
+Every 5–10 seconds the chaos monkey kills one pod. The ReplicaSet immediately creates a replacement. In the pod watch, you'll see one pod disappear and a new one appear.
+
+```bash
+# Watch pods get killed and recreated
+kubectl get pods -l app=web-app -w
+```
+
+To tell them apart:
+- **Load balancing** — hostname flips between 3 (or 4) pods, all different start times
+- **Chaos monkey** — a pod disappears completely and a brand-new one (young uptime) appears
 
 To stop the chaos monkey:
 
@@ -85,7 +74,6 @@ To stop everything:
 
 ```bash
 kubectl delete -f k8s/
-kind delete cluster
 ```
 
 ## Project Structure
@@ -93,10 +81,8 @@ kind delete cluster
 ```
 ├── docker-compose.yml         # Builds the web image (not for orchestration)
 ├── k8s/
-│   ├── kind-config.yaml        # kind cluster config (port 30081 → 8081)
 │   ├── deployment.yaml         # Web app Deployment (3 replicas)
-│   ├── service.yaml            # NodePort Service (port 30081)
-│   ├── chaos-rbac.yaml         # ServiceAccount + RBAC for chaos monkey
+│   ├── service.yaml            # LoadBalancer Service (port 8081)
 │   └── chaos-deployment.yaml   # Chaos monkey pod (5–10s interval)
 └── web/
     ├── Dockerfile              # Python container image definition

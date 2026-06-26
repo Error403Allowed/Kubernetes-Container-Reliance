@@ -57,7 +57,7 @@ function App() {
         </div>
          <div className="peers">
           <p>Replicas managed by Kubernetes</p>
-          <p className="hint">Chaos monkey kills a pod every 5-10s — the ReplicaSet brings it back</p>
+          <p className="hint">Chaos monkey kills a pod every 5-10s and the ReplicaSet brings it back</p>
         </div>
       </div>
     </div>

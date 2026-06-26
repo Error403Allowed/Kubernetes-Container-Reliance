@@ -14,20 +14,17 @@ spec:
       labels:
         app: chaos-monkey
     spec:
-      serviceAccountName: chaos-monkey
       containers:
       - name: chaos
-        image: bitnami/kubectl:latest
+        image: curlimages/curl:latest
         command:
         - /bin/sh
         - -c
         - |
           while true; do
-            POD=$(kubectl get pods -l app=web-app --field-selector status.phase=Running -o name | head -1)
-            if [ -n "$POD" ]; then
-              echo "[chaos] Killing $POD"
-              kubectl delete "$POD"
-            fi
+            echo "[chaos] Killing a web container..."
+            curl -sf http://web-app:8081/kill
+            echo " done"
             SLEEP=$(( (RANDOM % 6) + 5 ))
             sleep "$SLEEP"
           done

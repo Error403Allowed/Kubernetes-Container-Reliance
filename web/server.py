@@ -25,6 +25,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             }).encode())
             return
 
+        if self.path == '/kill':
+            print(f"[{HOSTNAME}] Chaos monkey killed me!")
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b'dying...')
+            os._exit(1)
+
         path = self.path
         if path == '/':
             path = '/index.html'
