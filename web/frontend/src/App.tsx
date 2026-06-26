@@ -55,9 +55,9 @@ function App() {
           <span className="dot" />
           <span>All Systems Healthy</span>
         </div>
-        <div className="peers">
-          <p>Peer containers: <strong>web1</strong>, <strong>web2</strong>, <strong>web3</strong></p>
-          <p className="hint">Try killing this container. You'll see that the app keeps running via nginx load balancing</p>
+         <div className="peers">
+          <p>Replicas managed by Kubernetes</p>
+          <p className="hint">Chaos monkey kills a pod every 5-10s — the ReplicaSet brings it back</p>
         </div>
       </div>
     </div>

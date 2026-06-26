@@ -1,63 +1,117 @@
-# Kubernetes Container Reliance
+# Kubernetes Container App
 
-A containerized Python web application demonstrating **horizontal scaling**, **load balancing**, and **resilience** using Docker Compose and nginx.
+A containerized Python web application demonstrating **horizontal scaling**, **self-healing**, and **load balancing** on a local [kind](https://kind.sigs.k8s.io/) Kubernetes cluster.
 
-Three identical Python HTTP server containers run behind an nginx reverse proxy. Requests are distributed across the pool in round-robin fashion. If any container goes down, nginx automatically fails over to healthy ones — mimicking how Kubernetes distributes traffic across pod replicas.
+Three replica pods run behind a Kubernetes Service. Chaos monkey randomly deletes a pod every 5–10 seconds — the ReplicaSet auto-heals and the Service keeps routing traffic to healthy pods. The app is accessible at `localhost:8081` without port-forwarding.
 
 ## Architecture
 
-                   Host port 8081
-                        |
-                   [nginx:alpine]       Reverse proxy / load balancer
-                  /        |        \
-                 v         v         v
-             [web1]    [web2]    [web3]    Python HTTP servers (port 5000)
+```
+                    http://localhost:8081
+                         |
+               [Service: NodePort :30081]
+                   /        |        \
+                  v         v         v
+              [pod]      [pod]      [pod]    Python HTTP servers (3 replicas)
+                                            Chaos monkey deletes one at random
+                                            ReplicaSet replaces it immediately
+```
 
-- **Reverse proxy** — nginx receives all traffic on port `8081` and load-balances across the three backends.
-- **Web containers** — three replicas of a Python 3.11 HTTP server. Each reports its own hostname so you can see which one handled your request.
-- **Health checks** — each container serves `/health` (JSON) and nginx is configured to detect and skip unhealthy backends.
+- **kind** — local Kubernetes cluster with port mapping `30081 → 8081`.
+- **Service** — NodePort on port `30081` distributes traffic across all ready pods.
+- **Deployment** — 3 replica pods, each running a Python 3.11 HTTP server.
+- **Health checks** — each pod serves `/health` (JSON).
+- **Chaos monkey** — a separate pod that deletes a random web pod every 5–10 seconds, forcing the system to self-heal.
 
 ## Prerequisites
 
-- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
+- [Homebrew](https://brew.sh/)
+- [Docker Desktop](https://docs.docker.com/get-docker/)
+- [kind](https://kind.sigs.k8s.io/) — installed via `brew install kind`
+- [kubectl](https://kubernetes.io/docs/tasks/tools/)
 
 ## Getting Started
 
 ```bash
-# Clone the repo
-git clone <repo-url>
-cd KubernetesContainerApp
+# 1. Install kind
+brew install kind
 
-# Start all containers with the load balancer
-docker compose up --build
+# 2. Create the cluster
+kind create cluster --config k8s/kind-config.yaml
 
-# Or run without the proxy (direct per-container access)
-docker compose -f docker-compose-no-proxy.yml up --build
-Open http://localhost:8081 in your browser. Refresh to see the hostname change as nginx round-robins across containers.
-Health endpoint
-curl http://localhost:8081/health
-# {"status": "healthy", "hostname": "web2", "uptime": "0:01:23"}
-Resilience Demo
-The setup tolerates container failures without downtime:
-# In one terminal, send continuous requests
-while true; do curl -s http://localhost:8081 | grep -o "Served by:.*"; sleep 0.5; done
+# 3. Build the web container image
+docker compose build
 
-# In another terminal, kill a container
-docker compose stop web1
-Requests continue uninterrupted — nginx routes traffic to web2 and web3. Restart the killed container and run docker compose stop web2 to see the same behavior.
-To simulate a full recovery:
-docker compose start web1   # web1 rejoins the pool
-Project Structure
-├── docker-compose.yml          # Main compose file (with nginx proxy)
-├── docker-compose-no-proxy.yml # Alternate compose file (direct access)
-├── nginx.conf                  # nginx load balancer configuration
+# 4. Load the image into kind
+kind load docker-image k8s-container-app
+
+# 5. Deploy everything to Kubernetes
+kubectl apply -f k8s/
+
+# 6. Open the app
+open http://localhost:8081
+```
+
+Refresh to see the hostname change as the Service load-balances across pods.
+
+## Chaos Monkey
+
+The chaos monkey pod runs automatically. It:
+
+1. Picks a random running web pod
+2. Deletes it with `kubectl delete pod`
+3. Sleeps 5–10 seconds
+4. Repeats forever
+
+The Kubernetes ReplicaSet controller detects the deleted pod and immediately creates a replacement. The Service seamlessly routes traffic to the remaining pods during the transition.
+
+To watch chaos in action:
+
+```bash
+# Terminal 1 — watch pods get killed and recreated
+kubectl get pods -l app=web-app -w
+
+# Terminal 2 — watch the hostname change as traffic shifts
+while true; do curl -s http://localhost:8081/health | python3 -m json.tool; sleep 1; done
+```
+
+To stop the chaos monkey:
+
+```bash
+kubectl delete deployment chaos-monkey
+```
+
+To stop everything:
+
+```bash
+kubectl delete -f k8s/
+kind delete cluster
+```
+
+## Project Structure
+
+```
+├── docker-compose.yml         # Builds the web image (not for orchestration)
+├── k8s/
+│   ├── kind-config.yaml        # kind cluster config (port 30081 → 8081)
+│   ├── deployment.yaml         # Web app Deployment (3 replicas)
+│   ├── service.yaml            # NodePort Service (port 30081)
+│   ├── chaos-rbac.yaml         # ServiceAccount + RBAC for chaos monkey
+│   └── chaos-deployment.yaml   # Chaos monkey pod (5–10s interval)
 └── web/
     ├── Dockerfile              # Python container image definition
-    └── server.py               # Python HTTP server (stdlib, no dependencies)
-server.py highlights
-- Pure Python stdlib — zero external dependencies.
-- GET / — returns an HTML page with the serving container's hostname, start time, and uptime.
-- GET /health — returns a JSON health status.
-- Configurable port — set via the PORT environment variable (default 5000).
-License
+    ├── server.py               # Python HTTP server (stdlib, no dependencies)
+    ├── frontend/               # React/TypeScript source (Vite)
+    └── static/                 # Built frontend assets
+```
+
+## API
+
+| Endpoint | Response |
+|---|---|
+| `GET /` | SPA frontend showing hostname, start time, uptime |
+| `GET /health` | `{"status": "healthy", "hostname": "pod-name", "started": "...", "uptime": "..."}` |
+
+## License
+
 Apache License 2.0
